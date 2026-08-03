@@ -16,6 +16,23 @@ export type SbomOptions = {
    * the file size and Black Duck does not read them.
    */
   includeLicenseText?: boolean;
+  /**
+   * Package URL type of the components, for example "npm" or "conan". Defaults to
+   * "npm". Set to null to emit no package URL at all, which is the honest choice for
+   * an ecosystem whose components cannot all be named by a single type: a wrong purl
+   * is worse than none, because the purl is what Black Duck matches on.
+   */
+  purlType?: string | null;
+  /**
+   * Emit a randomly generated serialNumber. Defaults to true. Set to false, together
+   * with timestamp, to make the document byte-for-byte reproducible.
+   */
+  serialNumber?: boolean;
+  /**
+   * Emit metadata.timestamp. Defaults to true. Set to false, together with
+   * serialNumber, to make the document byte-for-byte reproducible.
+   */
+  timestamp?: boolean;
 }
 
 /**
@@ -25,6 +42,12 @@ export type SbomOptions = {
 export type SbomPackage = {
   name: string;
   version: string;
+  /**
+   * Stable identity of this component. Defaults to name@version. Supply it when the
+   * name is a display name rather than an identifier, so that bom-refs and dependency
+   * edges key on something canonical.
+   */
+  bomRef?: string;
   license?: string;
   description?: string;
   homepage?: string;
@@ -128,6 +151,9 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
   if (errors.length !== 0)
     return { type: "Error", errors };
 
+  // An explicit null means "emit no purl"; leaving it out keeps the npm default.
+  const purlType = input.options.purlType !== undefined ? input.options.purlType : "npm";
+
   const licenseFactory = new CDX.Contrib.License.Factories.LicenseFactory(spdxExpressionParse);
 
   // bom-refs are derived from name@version so that repeated runs produce the same
@@ -166,12 +192,14 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
       group: split.group,
       version: p.version,
       description: isNonEmpty(p.description) ? p.description : undefined,
-      bomRef: uniqueRef(p.name + "@" + p.version)
+      bomRef: uniqueRef(isNonEmpty(p.bomRef) ? p.bomRef as string : p.name + "@" + p.version)
     });
-    try {
-      component.purl = new PackageURL("npm", split.group, split.name, p.version, undefined, undefined).toString();
-    } catch (e) {
-      errors.push(`Could not build a package URL for "${p.name}@${p.version}"${origin(p)}: ${e.message}`);
+    if (purlType !== null) {
+      try {
+        component.purl = new PackageURL(purlType, split.group, split.name, p.version, undefined, undefined).toString();
+      } catch (e) {
+        errors.push(`Could not build a package URL for "${p.name}@${p.version}"${origin(p)}: ${e.message}`);
+      }
     }
     if (isNonEmpty(p.homepage))
       component.externalReferences.add(new CDX.Models.ExternalReference(
@@ -182,8 +210,12 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
 
   const bom = new CDX.Models.Bom();
   bom.version = 1;
-  bom.serialNumber = CDX.Contrib.Bom.Utils.randomSerialNumber();
-  bom.metadata.timestamp = new Date();
+  // Both are random or wall-clock, so they are the only reason two runs over identical
+  // input differ. Everything else is sorted and content-derived.
+  if (input.options.serialNumber !== false)
+    bom.serialNumber = CDX.Contrib.Bom.Utils.randomSerialNumber();
+  if (input.options.timestamp !== false)
+    bom.metadata.timestamp = new Date();
 
   // Record this tool under metadata.tools.components. Anything placed in
   // metadata.tools.tools collapses the whole block to the deprecated flat form.

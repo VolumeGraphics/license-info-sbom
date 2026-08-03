@@ -1,6 +1,6 @@
 {
   "name": "@volumegraphics/license-info-sbom",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Builds a CycloneDX SBOM from collected package data and validates it against the CycloneDX JSON schema",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

@@ -43,9 +43,41 @@ resulting document is invalid, so the caller can abort before writing anything t
 |:---|:----------|
 |`buildSbom(input: SbomInput): Promise<SbomResult>`|Builds and validates the document.|
 |`SbomInput`|`product`, `packages`, `licenseTextByName`, `tool`, `options`.|
-|`SbomPackage`|The subset of collected package data the SBOM needs: `name`, `version`, and optionally `license`, `description`, `homepage`, `packageJson`, and the resolved `packageDependencies` / `packageDevDependencies` / `packageOptionalDependencies` arrays.|
-|`SbomOptions`|`specVersion` (`"1.6"` \| `"1.5"` \| `"1.4"`, default `"1.6"`) and `includeLicenseText` (default `false`).|
+|`SbomPackage`|The subset of collected package data the SBOM needs: `name`, `version`, and optionally `bomRef`, `license`, `description`, `homepage`, `packageJson`, and the resolved `packageDependencies` / `packageDevDependencies` / `packageOptionalDependencies` arrays.|
+|`SbomOptions`|See the options table below.|
 |`SbomResult`|`{ type: "Sbom", json }` or `{ type: "Error", errors }`.|
+
+## Options
+
+|Option|Default|Description|
+|:-----|:------|:----------|
+|`specVersion`|`"1.6"`|`"1.6"`, `"1.5"` or `"1.4"`. Black Duck only gained 1.6 support in release 2025.1.0.|
+|`includeLicenseText`|`false`|Embed license texts as base64 attachments. Multiplies the file size, and Black Duck does not read them.|
+|`purlType`|`"npm"`|Package URL type of the components, e.g. `"npm"` or `"conan"`. Set to `null` to emit no package URL at all.|
+|`serialNumber`|`true`|Emit a randomly generated `serialNumber`.|
+|`timestamp`|`true`|Emit `metadata.timestamp`.|
+
+### Ecosystems other than npm
+
+The default `purlType` is `"npm"`, and scoped names of the form `@scope/name` are split into
+a purl namespace and name accordingly. For a different ecosystem, either set `purlType` to
+that ecosystem's type, or set it to `null`.
+
+Prefer `null` over a type that is only right for part of your dependency set. The purl is
+what Black Duck matches on, so a purl naming the wrong ecosystem produces confidently wrong
+matches — which is worse than no purl, where matching falls back to name and version.
+
+### Reproducible output
+
+`serialNumber` and `timestamp` are the only non-deterministic parts of the document:
+everything else is sorted and content-derived. Set both to `false` and two runs over
+identical input produce byte-identical output.
+
+### Display names
+
+`bom-ref` defaults to `name@version`. If your `name` is a human-readable display name
+rather than an identifier, supply `bomRef` explicitly so that bom-refs and dependency edges
+key on something canonical while the rendered `name` stays human-readable.
 
 ## Input validation
 

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "outDir": "lib",
+    "module": "commonjs",
+    "target": "ES2021",
+    "noImplicitAny": true,
+    "jsx": "react",
+    "moduleResolution": "node",
+    "noImplicitThis": true,
+    "declaration": true
+  },
+  "include": [
+      "src/**/*"
+  ]
+}

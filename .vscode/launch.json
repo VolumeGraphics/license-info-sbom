@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // The one to reach for while working on a single test file: node runs the file
+      // directly, so every test executes in this process and breakpoints always bind - no
+      // child process to attach to.
+      //
+      // Open the test in the editor first: the program is derived from the open file, so
+      // "tests/licenses.test.ts" runs "out-test/tests/licenses.test.js".
+      "name": "Debug the open test file",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/out-test/tests/${fileBasenameNoExtension}.js",
+      "cwd": "${workspaceFolder}/out-test",
+      "preLaunchTask": "compile tests",
+      // Where the source maps that map back to src and tests are found.
+      "outFiles": ["${workspaceFolder}/out-test/**/*.js"],
+      "skipFiles": ["<node_internals>/**"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      // The whole suite, by way of `npm test`. Node's test runner puts every test file in a
+      // child process of its own, so breakpoints depend on autoAttachChildProcesses - it is
+      // on by default and named here because the configuration does not work without it.
+      "name": "Debug all tests",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"],
+      "cwd": "${workspaceFolder}",
+      "autoAttachChildProcesses": true,
+      "outFiles": ["${workspaceFolder}/out-test/**/*.js"],
+      "skipFiles": ["<node_internals>/**"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    }
+  ]
+}

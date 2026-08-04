@@ -99,13 +99,43 @@ produces a valid document.
 
 ## Validation
 
-The document is validated against the vendored CycloneDX JSON schema before it is
-returned. Validation is never skipped: if the validator itself is unavailable, that is
-reported as an error too, because "validated" must not silently degrade into
-"not validated".
+The document is validated against the CycloneDX JSON schema before it is returned.
+Validation is never skipped: if the validator itself cannot be set up, that is reported as
+an error too, because "validated" must not silently degrade into "not validated".
+
+Validation is performed here rather than through `CDX.Validation.JsonValidator`, using this
+package's own `ajv`. `@cyclonedx/cyclonedx-library` declares `ajv` as an *optional* peer
+dependency and then resolves it from its own location, so in a project whose dependency
+tree hoists a different `ajv` major, the library silently picks that one up and fails deep
+inside `ajv-formats` with `TypeError: Cannot read properties of undefined (reading 'code')`.
+It offers no way to inject an instance. Because `ajv` is a real dependency of this package,
+npm always places a compatible copy where this module can reach it — so validation works
+regardless of what the consuming project hoists. The ajv options and the schema files are
+taken from the library itself, so behaviour and schema version match what it would have
+done.
 
 Note that `serialNumber` and `metadata.timestamp` differ on every run, so the output is not
 byte-for-byte reproducible even though all lists are sorted.
+
+# Tests
+
+`npm test`
+
+This compiles `src` and `tests` into `out-test` and runs the compiled JavaScript with node's
+built-in test runner, so the tests need no framework and no dependency beyond the TypeScript
+compiler that is here anyway.
+
+They drive `buildSbom` through its public interface and assert on the serialized document,
+because those are the bytes the caller writes to disk. Any test that gets a document back has
+also asserted that the document validates against the CycloneDX schema, since `buildSbom`
+returns errors instead of a document whenever it does not.
+
+To debug them in VS Code, pick one of the two launch configurations. *Debug the open test
+file* runs the compiled counterpart of the test file in the editor directly, so every test
+executes in a single process and breakpoints always bind — that is the one to reach for while
+working on a test. *Debug all tests* goes through `npm test`, where node's test runner puts
+every test file in a child process of its own and the debugger attaches to each. Breakpoints
+in `src` work in both, by way of the source maps the test build emits.
 
 # Dependencies
 

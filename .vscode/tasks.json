@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Referenced as a preLaunchTask from launch.json, so that a debug session always runs
+      // the current source rather than whatever out-test happened to hold.
+      "label": "compile tests",
+      "type": "shell",
+      "command": "npx tsc -p tsconfig.test.json",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "silent", "clear": true },
+      "group": "build"
+    }
+  ]
+}

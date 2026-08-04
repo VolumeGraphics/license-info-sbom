@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "out-test",
+    "declaration": false,
+    // The tests run as compiled JavaScript, so without these a debugger stops in out-test
+    // rather than in the TypeScript the breakpoint was set in.
+    "sourceMap": true
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*"
+  ]
+}

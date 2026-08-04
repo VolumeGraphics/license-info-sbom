@@ -1,21 +1,6 @@
-import { readFileSync } from 'node:fs'
 import * as CDX from '@cyclonedx/cyclonedx-library'
 import { PackageURL } from 'packageurl-js'
 import spdxExpressionParse = require('spdx-expression-parse')
-// Resolved from THIS package, deliberately. cyclonedx-library declares ajv as an
-// optional peer dependency and then requires it from its own location, so in a consumer
-// whose tree hoists a different ajv major it silently picks that one up and dies inside
-// ajv-formats. ajv is a real dependency here, so npm guarantees a compatible copy is
-// reachable - which is why validation happens in this module rather than through
-// CDX.Validation.JsonValidator.
-import ajvModule = require('ajv')
-import ajvFormatsModule = require('ajv-formats')
-import addFormats2019 = require('ajv-formats-draft2019')
-
-// This project compiles without esModuleInterop, so reach for the default export by hand.
-// ajv-formats-draft2019 has no default: its module *is* the function.
-const Ajv = ajvModule.default;
-const addFormats = ajvFormatsModule.default;
 
 export type SbomSpecVersion = "1.6" | "1.5" | "1.4";
 
@@ -118,64 +103,6 @@ function isNonEmpty(value: string | undefined): boolean {
 
 function origin(p: SbomPackage): string {
   return p.packageJson !== undefined && p.packageJson.length > 0 ? ` (${p.packageJson[0]})` : "";
-}
-
-/**
- * Compiles the CycloneDX JSON schema for one specification version.
- *
- * This is deliberately a local reimplementation of what cyclonedx-library does in
- * `_optPlug.node/__jsonValidators/ajv.js`, with the same ajv options, so behaviour is
- * unchanged. The point is only *which* ajv runs it: theirs is resolved from their own
- * location and can be an incompatible major that a consumer happened to hoist, ours is a
- * declared dependency of this package. The library offers no way to inject an instance.
- *
- * Schema file locations come from the library rather than being hard-wired, so the schema
- * always matches the serializer that produced the document.
- */
-function compileValidator(spec: NonNullable<ReturnType<typeof specFor>>) {
-  // _Resources is exported at runtime from the package's main entry but is absent from
-  // its type declarations, so describe just the two members used here.
-  type SchemaFiles = {
-    CDX: { JSON_SCHEMA: Record<string, string | undefined> },
-    SPDX: { JSON_SCHEMA: string },
-    CryptoDefs: { JSON_SCHEMA: string },
-    JSF: { JSON_SCHEMA: string }
-  };
-  const files = (CDX as unknown as { _Resources: { FILES: SchemaFiles } })._Resources.FILES;
-
-  // JSON_SCHEMA has entries for specification versions that ship no schema (1.0, 1.1).
-  const schemaFile = files.CDX.JSON_SCHEMA[spec.version];
-  if (schemaFile === undefined)
-    throw new Error(`No CycloneDX JSON schema is available for specification version ${spec.version}.`);
-
-  const readSchema = (file: string) => JSON.parse(readFileSync(file, 'utf-8'));
-
-  const ajv = new Ajv({
-    useDefaults: false,
-    strict: false,
-    strictSchema: false,
-    addUsedSchema: false,
-    // No network access, ever. The schema references its siblings by absolute URI, and
-    // those are supplied from local files below; anything else is an error rather than a
-    // silent fetch.
-    loadSchema: (uri: string) => { throw new Error(`Remote schemas are disabled: ${uri}`) },
-    // Keyed by the exact URIs the CycloneDX schema $refs, or the references do not resolve.
-    schemas: {
-      'http://cyclonedx.org/schema/spdx.SNAPSHOT.schema.json': readSchema(files.SPDX.JSON_SCHEMA),
-      'http://cyclonedx.org/schema/cryptography-defs.SNAPSHOT.schema.json': readSchema(files.CryptoDefs.JSON_SCHEMA),
-      'http://cyclonedx.org/schema/jsf-0.82.SNAPSHOT.schema.json': readSchema(files.JSF.JSON_SCHEMA)
-    }
-  });
-
-  // ajv ships no formats of its own. Without these the schema still compiles, but every
-  // "format" assertion silently becomes a no-op, which is worse than failing.
-  addFormats(ajv);
-  addFormats2019(ajv, { formats: ['idn-email'] });
-  // Provided by neither formats package; registering it keeps it a known no-op rather
-  // than an unknown format.
-  ajv.addFormat('iri-reference', true);
-
-  return ajv.compile(readSchema(schemaFile));
 }
 
 /**
@@ -346,20 +273,18 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
   const json = serializer.serialize(bom, { sortLists: true, space: 2 });
 
   // Validate before handing the document back, so the caller can abort before writing.
-  let validate;
+  let validationErrors: unknown;
   try {
-    validate = compileValidator(spec);
+    validationErrors = await new CDX.Validation.JsonValidator(spec.version).validate(json);
   } catch (e) {
-    // Never let "validated" degrade silently into "not validated" - that is the whole
-    // point of generating the document here. Name the ajv in use: the failure mode this
-    // guards against is an incompatible one being picked up.
+    // MissingOptionalDependencyError or NotImplementedError: validation is unavailable.
+    // Treat that as a failure - "validated" must never silently degrade into "not
+    // validated", which is the whole point of generating the document here.
     return { type: "Error", errors: [`Could not validate the generated SBOM against the CycloneDX ${specVersion} schema: ${e.message}`] };
   }
-
-  // Validate the serialized document rather than the model, so what is checked is exactly
-  // the bytes the caller is about to write.
-  if (!validate(JSON.parse(json)))
-    return { type: "Error", errors: [formatSchemaErrors(validate.errors)] };
+  // A failed validation resolves with the findings; it does not throw.
+  if (validationErrors !== null)
+    return { type: "Error", errors: [formatSchemaErrors(validationErrors)] };
 
   return { type: "Sbom", json };
 }

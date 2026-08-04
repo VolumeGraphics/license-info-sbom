@@ -63,8 +63,8 @@ describe("schema validation", () => {
   });
 
   it("reports the first violation only, unlike the input checks", async () => {
-    // The ajv options mirror the ones cyclonedx-library uses, and those leave allErrors off.
-    // Worth knowing when reading a report: a second over-long version is not mentioned.
+    // cyclonedx-library's validator runs ajv with allErrors off. Worth knowing when reading
+    // a report: a second over-long version is not mentioned.
     const errors = await buildErrors({
       packages: [
         { name: "first", version: OVERLONG_VERSION },

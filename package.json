@@ -10,6 +10,7 @@
   "scripts": {
     "prepublishOnly": "tsc",
     "build": "tsc",
+    "pretest": "node -e \"require('node:fs').rmSync('out-test', { recursive: true, force: true })\"",
     "test": "tsc -p tsconfig.test.json && cd out-test && node --test"
   },
   "author": "Volume Graphics GmbH",

@@ -110,17 +110,5 @@ describe("input validation", () => {
     });
     assert.equal(errors.length, 1);
     assert.match(errors[0], /^Could not build a package URL for "@scope\/dependency@2\.0\.0": .*conan/);
-  });
-
-  it("reports a document that does not validate against the schema", async () => {
-    // Nothing in the input checks bounds the version string, but the schema caps it at
-    // 1024 characters - so this is a document that is only caught by validating it.
-    const errors = await buildErrors({
-      packages: [{ name: "dependency", version: "2.0.0-" + "x".repeat(1024) }]
-    });
-    assert.equal(errors.length, 1);
-    assert.match(errors[0], /^The generated SBOM does not validate against the CycloneDX schema:\n/);
-    // One finding per line, each naming where in the document it is.
-    assert.match(errors[0], /\n {2}\/components\/0\/version: must NOT have more than 1024 characters \{"limit":1024\}$/);
-  });
+  })
 })

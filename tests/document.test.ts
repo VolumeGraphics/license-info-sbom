@@ -180,8 +180,8 @@ describe("bom-ref", () => {
   })
 })
 
-describe("purlType", () => {
-  it("defaults to npm", async () => {
+describe("purlOptions", () => {
+  it("defaults to npm when no options are given", async () => {
     const document = await buildDocument({
       product: { name: "my-product", version: "1.2.3" },
       packages: [{ name: "dependency", version: "2.0.0" }]
@@ -190,27 +190,45 @@ describe("purlType", () => {
     assert.equal(component(document, "dependency").purl, "pkg:npm/dependency@2.0.0");
   });
 
-  it("names the configured ecosystem", async () => {
+  it("emits no package URL at all when the purl is null", async () => {
     const document = await buildDocument({
-      product: { name: "my-product", version: "1.2.3" },
-      packages: [{ name: "dependency", version: "2.0.0" }],
-      options: { purlType: "conan" }
-    });
-    assert.equal(document.metadata.component.purl, "pkg:conan/my-product@1.2.3");
-    assert.equal(component(document, "dependency").purl, "pkg:conan/dependency@2.0.0");
-  });
-
-  it("emits no package URL at all when null", async () => {
-    const document = await buildDocument({
-      product: { name: "my-product", version: "1.2.3" },
-      packages: [{ name: "@scope/dependency", version: "2.0.0" }],
-      options: { purlType: null }
+      product: { name: "my-product", version: "1.2.3", purlOptions: { purl: null } },
+      packages: [{ name: "@scope/dependency", version: "2.0.0", purlOptions: { purl: null } }]
     });
     assert.equal("purl" in document.metadata.component, false);
     const dependency = component(document, "dependency");
     assert.equal("purl" in dependency, false);
     // The scoped name is still split: group and name are not there for the purl's sake.
     assert.equal(dependency.group, "@scope");
+  });
+
+  it("takes a given purl verbatim", async () => {
+    // Nothing is built and nothing is checked: a caller that knows the purl of a component
+    // knows it better than a name and a version can say.
+    const purl = "pkg:conan/zlib@1.3.1?channel=stable";
+    const document = await buildDocument({
+      product: { name: "my-product", version: "1.2.3", purlOptions: { purl: "pkg:generic/my-product@1.2.3" } },
+      packages: [{ name: "zlib", version: "1.3.1", purlOptions: { purl } }]
+    });
+    assert.equal(document.metadata.component.purl, "pkg:generic/my-product@1.2.3");
+    assert.equal(component(document, "zlib").purl, purl);
+  });
+
+  it("is decided per component, so one document can mix ecosystems", async () => {
+    // The reason this is not one setting for the whole document: a dependency set whose
+    // components come from different ecosystems has no single right answer.
+    const document = await buildDocument({
+      packages: [
+        { name: "from-npm", version: "2.0.0" },
+        { name: "from-conan", version: "2.0.0", purlOptions: { purl: "pkg:conan/from-conan@2.0.0?channel=stable" } },
+        { name: "from-nuget", version: "2.0.0", purlOptions: { purl: "pkg:nuget/From.Nuget@2.0.0" } },
+        { name: "unnameable", version: "2.0.0", purlOptions: { purl: null } }
+      ]
+    });
+    assert.equal(component(document, "from-npm").purl, "pkg:npm/from-npm@2.0.0");
+    assert.equal(component(document, "from-conan").purl, "pkg:conan/from-conan@2.0.0?channel=stable");
+    assert.equal(component(document, "from-nuget").purl, "pkg:nuget/From.Nuget@2.0.0");
+    assert.equal("purl" in component(document, "unnameable"), false);
   })
 })
 

@@ -17,13 +17,6 @@ export type SbomOptions = {
    */
   includeLicenseText?: boolean;
   /**
-   * Package URL type of the components, for example "npm" or "conan". Defaults to
-   * "npm". Set to null to emit no package URL at all, which is the honest choice for
-   * an ecosystem whose components cannot all be named by a single type: a wrong purl
-   * is worse than none, because the purl is what Black Duck matches on.
-   */
-  purlType?: string | null;
-  /**
    * Emit a randomly generated serialNumber. Defaults to true. Set to false, together
    * with timestamp, to make the document byte-for-byte reproducible.
    */
@@ -33,6 +26,23 @@ export type SbomOptions = {
    * serialNumber, to make the document byte-for-byte reproducible.
    */
   timestamp?: boolean;
+}
+
+/**
+ * The package URL of one component, for a component the npm purl built from its name and
+ * version does not name correctly. Per component rather than per document, because a
+ * dependency set drawn from several ecosystems has no single right answer, and a wrong purl
+ * is worse than none: the purl is what Black Duck matches on.
+ */
+export type SbomPurlOptions = {
+  /**
+   * A complete package URL, used verbatim, or null to emit no package URL for this component
+   * at all. Mandatory either way, because naming the component is the only thing these
+   * options are for. Supply one for a component whose purl the caller already knows,
+   * because its ecosystem needs qualifiers, or names things differently than the name here
+   * does; null for a component that no purl names correctly.
+   */
+  purl: string | null;
 }
 
 /**
@@ -48,6 +58,11 @@ export type SbomPackage = {
    * edges key on something canonical.
    */
   bomRef?: string;
+  /**
+   * How this component is named by a package URL. Left out, an npm purl is built from the
+   * name and the version; supply the options to name it some other way, or not at all.
+   */
+  purlOptions?: SbomPurlOptions;
   license?: string;
   description?: string;
   homepage?: string;
@@ -151,9 +166,6 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
   if (errors.length !== 0)
     return { type: "Error", errors };
 
-  // An explicit null means "emit no purl"; leaving it out keeps the npm default.
-  const purlType = input.options.purlType !== undefined ? input.options.purlType : "npm";
-
   const licenseFactory = new CDX.Contrib.License.Factories.LicenseFactory(spdxExpressionParse);
 
   // bom-refs are derived from name@version so that repeated runs produce the same
@@ -194,12 +206,20 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
       description: isNonEmpty(p.description) ? p.description : undefined,
       bomRef: uniqueRef(isNonEmpty(p.bomRef) ? p.bomRef as string : p.name + "@" + p.version)
     });
-    if (purlType !== null) {
+    // Left out, the purl is built for npm; a purl of null means "emit no purl at all".
+    if (p.purlOptions === undefined) {
       try {
-        component.purl = new PackageURL(purlType, split.group, split.name, p.version, undefined, undefined).toString();
+        component.purl = new PackageURL("npm", split.group, split.name, p.version, undefined, undefined).toString();
       } catch (e) {
         errors.push(`Could not build a package URL for "${p.name}@${p.version}"${origin(p)}: ${e.message}`);
       }
+    } else if (p.purlOptions.purl !== null) {
+      // The purl is mandatory in the options, so options without one are a mistake rather
+      // than a request for the default: null is how to ask for no purl.
+      if (isNonEmpty(p.purlOptions.purl))
+        component.purl = p.purlOptions.purl;
+      else
+        errors.push(`The purl options of "${p.name}@${p.version}"${origin(p)} carry no package URL. Leave them out for an npm package URL, or set purl to null for none.`);
     }
     if (isNonEmpty(p.homepage))
       component.externalReferences.add(new CDX.Models.ExternalReference(

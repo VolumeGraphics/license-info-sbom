@@ -43,7 +43,8 @@ resulting document is invalid, so the caller can abort before writing anything t
 |:---|:----------|
 |`buildSbom(input: SbomInput): Promise<SbomResult>`|Builds and validates the document.|
 |`SbomInput`|`product`, `packages`, `licenseTextByName`, `tool`, `options`.|
-|`SbomPackage`|The subset of collected package data the SBOM needs: `name`, `version`, and optionally `bomRef`, `license`, `description`, `homepage`, `packageJson`, and the resolved `packageDependencies` / `packageDevDependencies` / `packageOptionalDependencies` arrays.|
+|`SbomPackage`|The subset of collected package data the SBOM needs: `name`, `version`, and optionally `bomRef`, `purlOptions`, `license`, `description`, `homepage`, `packageJson`, and the resolved `packageDependencies` / `packageDevDependencies` / `packageOptionalDependencies` arrays.|
+|`SbomPurlOptions`|One mandatory property, `purl`: a package URL, or `null` for none. See the package URL section below.|
 |`SbomOptions`|See the options table below.|
 |`SbomResult`|`{ type: "Sbom", json }` or `{ type: "Error", errors }`.|
 
@@ -53,19 +54,8 @@ resulting document is invalid, so the caller can abort before writing anything t
 |:-----|:------|:----------|
 |`specVersion`|`"1.6"`|`"1.6"`, `"1.5"` or `"1.4"`. Black Duck only gained 1.6 support in release 2025.1.0.|
 |`includeLicenseText`|`false`|Embed license texts as base64 attachments. Multiplies the file size, and Black Duck does not read them.|
-|`purlType`|`"npm"`|Package URL type of the components, e.g. `"npm"` or `"conan"`. Set to `null` to emit no package URL at all.|
 |`serialNumber`|`true`|Emit a randomly generated `serialNumber`.|
 |`timestamp`|`true`|Emit `metadata.timestamp`.|
-
-### Ecosystems other than npm
-
-The default `purlType` is `"npm"`, and scoped names of the form `@scope/name` are split into
-a purl namespace and name accordingly. For a different ecosystem, either set `purlType` to
-that ecosystem's type, or set it to `null`.
-
-Prefer `null` over a type that is only right for part of your dependency set. The purl is
-what Black Duck matches on, so a purl naming the wrong ecosystem produces confidently wrong
-matches — which is worse than no purl, where matching falls back to name and version.
 
 ### Reproducible output
 
@@ -79,6 +69,34 @@ identical input produce byte-identical output.
 rather than an identifier, supply `bomRef` explicitly so that bom-refs and dependency edges
 key on something canonical while the rendered `name` stays human-readable.
 
+## Package URLs
+
+The package URL is decided per component, through `purlOptions` on the `SbomPackage` — the
+product included, since that is an `SbomPackage` too.
+
+|`purlOptions`|Result|
+|:------------|:-----|
+|left out|`pkg:npm/<name>@<version>` is built from the name and the version.|
+|`{ purl: "pkg:conan/zlib@1.3.1?channel=stable" }`|That purl is used verbatim.|
+|`{ purl: null }`|No `purl` is emitted for this component.|
+
+`purl` is the only property, and it is mandatory: naming the component is the only thing the
+options are for. Options without a usable purl are reported as an error rather than quietly
+falling back to the npm default — leave the options out to ask for that, and set `purl` to
+`null` to ask for no package URL at all.
+
+The built purl is always an npm one, and scoped names of the form `@scope/name` are split
+into a purl namespace and name accordingly.
+
+A given `purl` is taken as it stands and is not checked, so it is the way to name a component
+whose ecosystem needs qualifiers, or whose real name differs from the `name` in the document.
+
+Prefer a null `purl` over one you are not sure of. The purl is what Black Duck matches on,
+so a wrong one produces confidently wrong matches — worse than no purl, where matching falls
+back to name and version. Being a per-component decision, a dependency set drawn from several
+ecosystems does not have to make that trade for all of it at once: name each component the
+way it can be named, and leave the rest without a purl.
+
 ## Input validation
 
 Every component must have a name and a version, and all problems are reported at once
@@ -87,10 +105,11 @@ SBOM; without a version the package URL is incomplete and component matching deg
 
 ## What the document contains
 
-Per component: `type`, `name`, `group` for scoped packages, `version`, a `purl`, a unique
-`bom-ref`, the `licenses` entry, and the homepage as an external reference. The document
-carries a `serialNumber`, `metadata.timestamp`, `metadata.tools`, `metadata.component` for
-the product, and a `dependencies` graph built from the resolved dependency arrays.
+Per component: `type`, `name`, `group` for scoped packages, `version`, a `purl` unless that
+component asked for none, a unique `bom-ref`, the `licenses` entry, and the homepage as an
+external reference. The document carries a `serialNumber`, `metadata.timestamp`,
+`metadata.tools`, `metadata.component` for the product, and a `dependencies` graph built
+from the resolved dependency arrays.
 
 Licenses follow the CycloneDX convention: a valid SPDX identifier becomes `license.id`, a
 valid SPDX expression becomes `expression`, and anything else becomes free text in

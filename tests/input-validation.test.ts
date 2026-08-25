@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert = require('node:assert/strict')
+import { SbomPurlOptions } from '../src/sbom'
 import { build, buildErrors } from './helpers'
 
 describe("input validation", () => {
@@ -88,27 +89,28 @@ describe("input validation", () => {
   });
 
   it("reports every package URL that cannot be built", async () => {
-    // An empty purlType is neither the npm default nor the explicit null that means "emit
-    // no purl", so it reaches packageurl-js and is rejected there.
+    // A scope with nothing after it passes the input checks - the name is not empty - but
+    // splits into a purl namespace and no name at all, which packageurl-js rejects.
     const errors = await buildErrors({
-      product: { name: "product", version: "1.0.0" },
-      packages: [{ name: "dependency", version: "2.0.0" }],
-      options: { purlType: "" }
+      product: { name: "@product/", version: "1.0.0" },
+      packages: [{ name: "@dependency/", version: "2.0.0" }]
     });
     assert.equal(errors.length, 2);
-    assert.match(errors[0], /^Could not build a package URL for "product@1\.0\.0": /);
-    assert.match(errors[1], /^Could not build a package URL for "dependency@2\.0\.0": /);
+    assert.match(errors[0], /^Could not build a package URL for "@product\/@1\.0\.0": /);
+    assert.match(errors[1], /^Could not build a package URL for "@dependency\/@2\.0\.0": /);
   });
 
-  it("reports a scoped name the configured ecosystem cannot express", async () => {
-    // A purl namespace means something different in every ecosystem: conan demands a
-    // channel qualifier alongside it. Better an error than a purl that Black Duck would
-    // match on.
+  it("reports purl options that carry no package URL", async () => {
+    // The purl is mandatory in the options, so options without one are a mistake and not a
+    // request for the npm default - that is what leaving them out asks for, and a purl of
+    // null is how to ask for none. The cast stands in for a JavaScript caller, the only one
+    // who gets here past the declared type.
     const errors = await buildErrors({
-      packages: [{ name: "@scope/dependency", version: "2.0.0" }],
-      options: { purlType: "conan" }
+      product: { name: "product", version: "1.0.0", purlOptions: {} as SbomPurlOptions },
+      packages: [{ name: "dependency", version: "2.0.0", purlOptions: { purl: "  " } }]
     });
-    assert.equal(errors.length, 1);
-    assert.match(errors[0], /^Could not build a package URL for "@scope\/dependency@2\.0\.0": .*conan/);
+    assert.equal(errors.length, 2);
+    assert.match(errors[0], /^The purl options of "product@1\.0\.0" carry no package URL\. Leave them out for an npm package URL, or set purl to null for none\.$/);
+    assert.match(errors[1], /^The purl options of "dependency@2\.0\.0" carry no package URL\./);
   })
 })

@@ -4,6 +4,12 @@ import spdxExpressionParse = require('spdx-expression-parse')
 
 export type SbomSpecVersion = "1.6" | "1.5" | "1.4";
 
+/** The dependency fields of a package.json that a document can cover. */
+export type DependencyType = "dependencies" | "devDependencies" | "optionalDependencies";
+
+/** Every DependencyType. */
+export const DEPENDENCY_TYPES: DependencyType[] = ["dependencies", "devDependencies", "optionalDependencies"];
+
 export type SbomOptions = {
   /**
    * CycloneDX specification version of the generated document. Defaults to "1.6".
@@ -26,6 +32,19 @@ export type SbomOptions = {
    * serialNumber, to make the document byte-for-byte reproducible.
    */
   timestamp?: boolean;
+  /**
+   * Which of the product's dependency fields the document covers. Left out, every package
+   * in `packages` is listed, whether the product reaches it or not. Given, only the
+   * packages the product reaches through these fields are listed, so that one collected
+   * dependency tree yields, say, a document of everything that was built and one of what
+   * ships: ["dependencies", "optionalDependencies"].
+   *
+   * The fields name the product's own dependencies. Below the product, a package's
+   * dependencies are always followed and its optionalDependencies only when
+   * "optionalDependencies" is given, the way npm's --omit=optional works. A package's
+   * devDependencies are never followed, for the reason given at the edges in buildSbom.
+   */
+  dependencyTypes?: DependencyType[];
 }
 
 /**
@@ -75,7 +94,7 @@ export type SbomPackage = {
 export type SbomInput = {
   /** The product itself, used for metadata.component. */
   product: SbomPackage;
-  /** Every dependency to list as a component. */
+  /** Every dependency to list as a component, or with dependencyTypes, to choose from. */
   packages: SbomPackage[];
   /** License texts keyed by license name. Only consulted when includeLicenseText is set. */
   licenseTextByName: Map<string, string>;
@@ -150,6 +169,50 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
   if (spec === undefined)
     return { type: "Error", errors: [`Unsupported CycloneDX specification version "${specVersion}". Supported versions are 1.6, 1.5 and 1.4.`] };
 
+  const dependencyTypes = input.options.dependencyTypes;
+  if (dependencyTypes !== undefined) {
+    if (dependencyTypes.length === 0)
+      return { type: "Error", errors: [`dependencyTypes is empty, so the document would list no dependency at all. Leave it out to list every package, or give at least one of ${DEPENDENCY_TYPES.join(", ")}.`] };
+    const unknown = dependencyTypes.filter(t => !DEPENDENCY_TYPES.includes(t));
+    if (unknown.length !== 0)
+      return { type: "Error", errors: [`Unknown dependency type ${unknown.map(t => `"${t}"`).join(", ")}. Possible values are ${DEPENDENCY_TYPES.join(", ")}.`] };
+  }
+
+  // The edges that count, both for choosing the listed packages and for the dependency
+  // graph, so that the graph never points out of the document and the document holds
+  // nothing its graph cannot reach. The collector's resolved dependency arrays hold the very
+  // same objects that are in `packages`, so edges are matched by identity.
+  //
+  // Development edges are taken from the product only. npm never installs the
+  // devDependencies of a dependency, so a development edge on a third-party package can
+  // only have been resolved against some unrelated package that happens to satisfy the
+  // version range - the collector resolves by searching the flat package list, not by
+  // walking node_modules. Following those would claim edges that do not exist.
+  const covers = (type: DependencyType) => dependencyTypes === undefined || dependencyTypes.includes(type);
+  const edgesOf = (p: SbomPackage, isProduct: boolean) => ([] as SbomPackage[]).concat(
+    (!isProduct || covers("dependencies")) && p.packageDependencies !== undefined ? p.packageDependencies : [],
+    covers("optionalDependencies") && p.packageOptionalDependencies !== undefined ? p.packageOptionalDependencies : [],
+    isProduct && covers("devDependencies") && p.packageDevDependencies !== undefined ? p.packageDevDependencies : []
+  );
+
+  // Without dependencyTypes every package given is listed, reached or not. With them, only
+  // what the product reaches through the edges above is listed - and only that is checked
+  // below, so a development-only package cannot fail a document of what ships.
+  let packages = input.packages;
+  if (dependencyTypes !== undefined) {
+    const given = new Set(input.packages);
+    const reached = new Set<SbomPackage>();
+    const pending = edgesOf(input.product, true);
+    while (pending.length !== 0) {
+      const p = pending.pop() as SbomPackage;
+      if (!given.has(p) || reached.has(p))
+        continue;
+      reached.add(p);
+      pending.push(...edgesOf(p, false));
+    }
+    packages = input.packages.filter(p => reached.has(p));
+  }
+
   // Check the input data first, and report every problem rather than only the first one.
   // A component without a name makes Black Duck reject the entire SBOM, and a component
   // without a version yields an incomplete package URL, which degrades matching.
@@ -161,7 +224,7 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
       errors.push(`${role} "${p.name}" has no version${origin(p)}. Without a version the package URL is incomplete and component matching degrades.`);
   };
   checkPackage(input.product, "The product");
-  for (const p of input.packages)
+  for (const p of packages)
     checkPackage(p, "Dependency");
   if (errors.length !== 0)
     return { type: "Error", errors };
@@ -253,7 +316,7 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
   bom.metadata.component = rootComponent;
 
   const componentOf = new Map<SbomPackage, CDX.Models.Component>();
-  for (const p of input.packages) {
+  for (const p of packages) {
     const component = makeComponent(p, CDX.Enums.ComponentType.Library);
     bom.components.add(component);
     componentOf.set(p, component);
@@ -262,28 +325,17 @@ export async function buildSbom(input: SbomInput): Promise<SbomResult> {
   if (errors.length !== 0)
     return { type: "Error", errors };
 
-  // Dependency edges. The collector's resolved dependency arrays hold the very same
-  // objects that are in `packages`, so the map lookup works by identity.
-  //
-  // Development edges are taken from the product only. npm never installs the
-  // devDependencies of a dependency, so a development edge on a third-party package can
-  // only have been resolved against some unrelated package that happens to satisfy the
-  // version range - the collector resolves by searching the flat package list, not by
-  // walking node_modules. Following those would claim edges that do not exist.
-  const edgesOf = (p: SbomPackage, includeDevelopment: boolean) => ([] as SbomPackage[]).concat(
-    p.packageDependencies !== undefined ? p.packageDependencies : [],
-    p.packageOptionalDependencies !== undefined ? p.packageOptionalDependencies : [],
-    includeDevelopment && p.packageDevDependencies !== undefined ? p.packageDevDependencies : []
-  );
-  const addEdges = (from: CDX.Models.Component, p: SbomPackage, includeDevelopment: boolean) => {
-    for (const dependency of edgesOf(p, includeDevelopment)) {
+  // Dependency edges, by the rule chosen above. An edge to a package that is not listed is
+  // dropped.
+  const addEdges = (from: CDX.Models.Component, p: SbomPackage, isProduct: boolean) => {
+    for (const dependency of edgesOf(p, isProduct)) {
       const to = componentOf.get(dependency);
       if (to !== undefined && to !== from)
         from.dependencies.add(to.bomRef);
     }
   };
   addEdges(rootComponent, input.product, true);
-  for (const p of input.packages) {
+  for (const p of packages) {
     const from = componentOf.get(p);
     if (from !== undefined)
       addEdges(from, p, false);

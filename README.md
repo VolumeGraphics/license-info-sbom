@@ -47,7 +47,6 @@ resulting document is invalid, so the caller can abort before writing anything t
 |`SbomPurlOptions`|One mandatory property, `purl`: a package URL, or `null` for none. See the package URL section below.|
 |`SbomOptions`|See the options table below.|
 |`SbomResult`|`{ type: "Sbom", json }` or `{ type: "Error", errors }`.|
-|`DependencyType`, `DEPENDENCY_TYPES`|The dependency fields a document can cover — `"dependencies"`, `"devDependencies"` and `"optionalDependencies"` — and the list of all of them.|
 
 ## Options
 
@@ -57,7 +56,6 @@ resulting document is invalid, so the caller can abort before writing anything t
 |`includeLicenseText`|`false`|Embed license texts as base64 attachments. Multiplies the file size, and Black Duck does not read them.|
 |`serialNumber`|`true`|Emit a randomly generated `serialNumber`.|
 |`timestamp`|`true`|Emit `metadata.timestamp`.|
-|`dependencyTypes`|every package|Which of the product's dependency fields the document covers. See **Choosing what a document covers** below.|
 
 ### Reproducible output
 
@@ -70,26 +68,6 @@ identical input produce byte-identical output.
 `bom-ref` defaults to `name@version`. If your `name` is a human-readable display name
 rather than an identifier, supply `bomRef` explicitly so that bom-refs and dependency edges
 key on something canonical while the rendered `name` stays human-readable.
-
-### Choosing what a document covers
-
-Left out, `dependencyTypes` lists every package in `packages`, whether the product depends
-on it or not. Given, the document lists only the packages the product reaches through those
-of its dependency fields, so one collected dependency tree can yield several documents —
-for example everything that was built, and what ships:
-
-```js
-const built = await buildSbom({ ...input, options: { dependencyTypes: ["dependencies", "devDependencies", "optionalDependencies"] } });
-const shipped = await buildSbom({ ...input, options: { dependencyTypes: ["dependencies", "optionalDependencies"] } });
-```
-
-The fields name the product's own dependencies. Below the product, a package's
-`dependencies` are always followed and its `optionalDependencies` only when
-`"optionalDependencies"` is given, the way npm's `--omit=optional` works. A package's
-`devDependencies` are never followed: npm does not install them, so such an edge could only
-have been resolved against an unrelated package that happens to match the version range.
-
-The dependency graph follows the same edges, so it never points outside the document.
 
 ## Package URLs
 
@@ -124,8 +102,6 @@ way it can be named, and leave the rest without a purl.
 Every component must have a name and a version, and all problems are reported at once
 rather than only the first. A component without a name makes Black Duck reject the entire
 SBOM; without a version the package URL is incomplete and component matching degrades.
-With `dependencyTypes` only the packages the document lists are checked, so a
-development-only package cannot fail a document of what ships.
 
 ## What the document contains
 
